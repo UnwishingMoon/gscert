@@ -20,10 +20,17 @@ const (
 	mkcert -key domainkey.pem -csr domaincsr.pem -ca-key rootkey.pem -d
 	mkcert -key domainkey.pem -csr domaincsr.pem -ca rootca.pem -ca-key rootkey.pem
 	`
-	versionText     = `v0.1`
-	configFolder    = `.gscert`
-	defaultRootKey  = `root-key.pem`
-	defaultRootCert = `root-cert.pem`
+
+	versionText  = `v0.1`
+	configFolder = `.gscert`
+
+	dRootKeyName  = `root-key.pem`
+	dRootCertName = `root-cert.pem`
+
+	dCertKeyName = `cert-key.pem`
+	dCertName    = `cert.pem`
+
+	dcsrName = `csr.pem`
 )
 
 type stringFlags []string
@@ -40,8 +47,9 @@ func (i *stringFlags) Set(value string) error {
 func main() {
 	var (
 		// Predefined variables
-		userDir, _ = os.UserHomeDir()
+		userDir, _ = os.Getwd() // os.UserHomeDir() // Using current directory for dev
 		configDir  = path.Join(userDir, configFolder)
+		err        error
 
 		// Flags
 		help         = flag.Bool("help", false, "")
@@ -122,8 +130,8 @@ func main() {
 	// Root Key Flag
 	if *rootKeyFlag == "" {
 
-		// Checks if root key exists
-		if _, err := os.Stat(path.Join(configDir, defaultRootKey)); os.IsNotExist(err) {
+		// If root key does not exist
+		if _, err = os.Stat(path.Join(configDir, dRootKeyName)); os.IsNotExist(err) {
 
 			// Generating a new root key
 			rootKey, err = rsa.GenerateKey(rand.Reader, *bits)
@@ -132,13 +140,13 @@ func main() {
 				return
 			}
 
-			os.WriteFile(path.Join(configDir, defaultRootKey), rootKey.N.Bytes(), 600)
+			os.WriteFile(path.Join(configDir, dRootKeyName), rootKey.N.Bytes(), 600)
 		}
 
 	} else {
 
 		// Checks if root key exists
-		if _, err := os.Stat(*rootKeyFlag); os.IsNotExist(err) {
+		if _, err = os.Stat(*rootKeyFlag); os.IsNotExist(err) {
 			fmt.Println("Could not find Root Key file:", err)
 			return
 		}
@@ -158,18 +166,22 @@ func main() {
 	// Root Cert Flag
 	if *rootCertFlag == "" {
 
-		// Checks if cert exists
-		if _, err := os.Stat(path.Join(configDir, defaultRootCert)); os.IsNotExist(err) {
+		// If cert does not exist
+		if _, err = os.Stat(path.Join(configDir, dRootCertName)); os.IsNotExist(err) {
 
-			cert, err := x509.CreateCertificate(rand.Reader, &rootCertTml, &rootCertTml, rootKey.PublicKey, rootKey)
+			cert, err := x509.CreateCertificate(rand.Reader, &rootTmpl, &rootTmpl, rootKey.PublicKey, rootKey)
 			if err != nil {
 				fmt.Println("Could not create Root Certificate:", err)
 				return
 			}
 
-			rootCert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert})
+			rootCert, err = x509.ParseCertificate(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert}))
+			if err != nil {
+				fmt.Println("Could not create Root Certificate:", err)
+				return
+			}
 
-			os.WriteFile(path.Join(configDir, defaultRootCert), rootCert, 600)
+			os.WriteFile(path.Join(configDir, dRootCertName), rootCert.Raw, 600)
 		}
 
 	} else {

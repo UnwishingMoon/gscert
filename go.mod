@@ -1,3 +1,3 @@
-module github.com/UnwishingMoon/mkcert
+module github.com/UnwishingMoon/gscert
 
-go 1.17
+go 1.18

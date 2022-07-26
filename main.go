@@ -78,6 +78,8 @@ const (
 	dCertName    = `cert.pem`
 
 	dcsrName = `csr.pem`
+
+	minBits = 4096
 )
 
 var versionText string = `v0.1`
@@ -93,9 +95,13 @@ func (i *stringFlags) Set(value string) error {
 	return nil
 }
 
-// Generate a RSA key
+// genReadKey Generate or reads a RSA key from a file
 func genReadKey(file string, bits int) (*rsa.PrivateKey, error) {
 	var key *rsa.PrivateKey
+
+	if bits < minBits {
+		bits = minBits
+	}
 
 	if _, err := os.Stat(file); errors.Is(err, fs.ErrNotExist) {
 
@@ -147,6 +153,7 @@ func genReadKey(file string, bits int) (*rsa.PrivateKey, error) {
 	return key, nil
 }
 
+// genReadCert Reads or generate a certificate from path with provided informations
 func genReadCert(file string, priv *rsa.PrivateKey, rootPriv *rsa.PrivateKey, tmpl *x509.Certificate, rootTmpl *x509.Certificate) (*x509.Certificate, error) {
 	var cert *x509.Certificate
 	var err error
@@ -206,6 +213,7 @@ func genReadCert(file string, priv *rsa.PrivateKey, rootPriv *rsa.PrivateKey, tm
 	return cert, nil
 }
 
+// genReadCSR Reads or generate a CSR from a provided path
 func genReadCSR(file string, priv *rsa.PrivateKey, tmpl *x509.CertificateRequest) (*x509.CertificateRequest, error) {
 	var csr *x509.CertificateRequest
 	var err error
@@ -236,6 +244,7 @@ func genReadCSR(file string, priv *rsa.PrivateKey, tmpl *x509.CertificateRequest
 	return csr, nil
 }
 
+// renewCert Re-generates a certificate from a provided path
 func renewCert(file string, priv *rsa.PrivateKey, rootPriv *rsa.PrivateKey, tmpl *x509.Certificate, rootTmpl *x509.Certificate) (*x509.Certificate, error) {
 	var cert *x509.Certificate
 	var err error
@@ -311,7 +320,7 @@ func main() {
 		renew        = flag.Bool("renew", false, "")                          // If the certificate should just be renewed in-place
 		hookFlag     = flag.String("deploy-hook", "", "")                     // Command to execute after the deploy has been completed
 		org          = flag.String("org", "GSCert Security Certificates", "") // Custom organization name
-		bits         = flag.Int("b", 4096, "")                                // Number of bits for the key
+		bits         = flag.Int("b", minBits, "")                             // Number of bits for the key
 
 		// Serialnumbers
 		serialNumberLimit = new(big.Int).Lsh(big.NewInt(1), 128)

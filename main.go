@@ -1,8 +1,9 @@
 package main
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -36,7 +37,7 @@ const (
 	-cert
 		Path to the certificate
 
-	-key
+	-cert-key
 		Path to the private key
 
 	-csr
@@ -52,7 +53,7 @@ const (
 		Organization name (Default: "GSCert Security Certificates")
 
 	-b
-		Change the bits of the key (Default: 4096)
+		Change the bits of the key, can't be lower than the default (Default: 4096)
 
 	-deploy-hook
 		Path to a script or command to run after the certificate is generated (It is run only after a successfull renewal)
@@ -78,11 +79,9 @@ const (
 	dCertName    = `cert.pem`
 
 	dcsrName = `csr.pem`
-
-	minBits = 4096
 )
 
-var versionText string = `v0.1`
+var version string = "0.1"
 
 type stringFlags []string
 
@@ -95,232 +94,27 @@ func (i *stringFlags) Set(value string) error {
 	return nil
 }
 
-// genReadKey Generate or reads a RSA key from a file
-func genReadKey(file string, bits int) (*rsa.PrivateKey, error) {
-	var key *rsa.PrivateKey
-
-	if bits < minBits {
-		bits = minBits
-	}
-
-	if _, err := os.Stat(file); errors.Is(err, fs.ErrNotExist) {
-
-		// Generating a new key
-		key, err = rsa.GenerateKey(rand.Reader, bits)
-		if err != nil {
-			fmt.Println("could not generate private key:", err)
-			return nil, err
-		}
-
-		keyFile, err := os.Create(file)
-		if err != nil {
-			return nil, err
-		}
-		defer keyFile.Close()
-
-		err = pem.Encode(keyFile, &pem.Block{
-			Type:  "RSA PRIVATE KEY",
-			Bytes: x509.MarshalPKCS1PrivateKey(key),
-		})
-		if err != nil {
-			return nil, err
-		}
-
-	} else {
-
-		// Using the found key
-		if _, err = os.Stat(file); errors.Is(err, fs.ErrNotExist) {
-			return nil, err
-		}
-
-		keyString, err := os.ReadFile(file)
-		if err != nil {
-			return nil, err
-		}
-
-		keyPem, _ := pem.Decode(keyString)
-		if keyPem.Type != "RSA PRIVATE KEY" {
-			return nil, errors.New("input file is not a private key, found: " + keyPem.Type)
-		}
-
-		key, err = x509.ParsePKCS1PrivateKey(keyPem.Bytes)
-		if err != nil {
-			return nil, err
-		}
-
-	}
-
-	return key, nil
-}
-
-// genReadCert Reads or generate a certificate from path with provided informations
-func genReadCert(file string, priv *rsa.PrivateKey, rootPriv *rsa.PrivateKey, tmpl *x509.Certificate, rootTmpl *x509.Certificate) (*x509.Certificate, error) {
-	var cert *x509.Certificate
-	var err error
-
-	if rootPriv == nil {
-		rootPriv = priv
-	}
-
-	if rootTmpl == nil {
-		rootTmpl = tmpl
-	}
-
-	if _, err = os.Stat(file); errors.Is(err, fs.ErrNotExist) {
-
-		derCert, err := x509.CreateCertificate(rand.Reader, tmpl, rootTmpl, &priv.PublicKey, rootPriv)
-		if err != nil {
-			return nil, err
-		}
-
-		certFile, err := os.Create(file)
-		if err != nil {
-			return nil, err
-		}
-		defer certFile.Close()
-
-		err = pem.Encode(certFile, &pem.Block{Type: "CERTIFICATE", Bytes: derCert})
-		if err != nil {
-			return nil, err
-		}
-
-		cert, err = x509.ParseCertificate(derCert)
-		if err != nil {
-			return nil, err
-		}
-
-	} else {
-		if _, err := os.Stat(file); errors.Is(err, fs.ErrNotExist) {
-			return nil, err
-		}
-
-		certString, err := os.ReadFile(file)
-		if err != nil {
-			return nil, err
-		}
-
-		certPem, _ := pem.Decode(certString)
-		if certPem.Type != "CERTIFICATE" {
-			return nil, errors.New("input file is not a certificate, found: " + certPem.Type)
-		}
-
-		cert, err = x509.ParseCertificate(certPem.Bytes)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return cert, nil
-}
-
-// genReadCSR Reads or generate a CSR from a provided path
-func genReadCSR(file string, priv *rsa.PrivateKey, tmpl *x509.CertificateRequest) (*x509.CertificateRequest, error) {
-	var csr *x509.CertificateRequest
-	var err error
-
-	if _, err = os.Stat(file); errors.Is(err, fs.ErrNotExist) {
-		derCSR, err := x509.CreateCertificateRequest(rand.Reader, tmpl, priv)
-		if err != nil {
-			return nil, err
-		}
-
-		csrFile, err := os.Create(file)
-		if err != nil {
-			return nil, err
-		}
-		defer csrFile.Close()
-
-		err = pem.Encode(csrFile, &pem.Block{Type: "CERTIFICATE REQUEST", Bytes: derCSR})
-		if err != nil {
-			return nil, err
-		}
-
-		csr, err = x509.ParseCertificateRequest(derCSR)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return csr, nil
-}
-
-// renewCert Re-generates a certificate from a provided path
-func renewCert(file string, priv *rsa.PrivateKey, rootPriv *rsa.PrivateKey, tmpl *x509.Certificate, rootTmpl *x509.Certificate) (*x509.Certificate, error) {
-	var cert *x509.Certificate
-	var err error
-
-	if _, err = os.Stat(file); errors.Is(err, fs.ErrNotExist) {
-		return nil, err
-	}
-
-	// Reading the old certificate
-
-	certString, err := os.ReadFile(file)
-	if err != nil {
-		return nil, err
-	}
-
-	certPem, _ := pem.Decode(certString)
-	if certPem.Type != "CERTIFICATE" {
-		return nil, errors.New("input file is not a certificate, found: " + certPem.Type)
-	}
-
-	cert, err = x509.ParseCertificate(certPem.Bytes)
-	if err != nil {
-		return nil, err
-	}
-
-	tmpl.DNSNames = cert.DNSNames
-
-	// Recreating the certificate
-
-	derCert, err := x509.CreateCertificate(rand.Reader, tmpl, rootTmpl, &priv.PublicKey, rootPriv)
-	if err != nil {
-		return nil, err
-	}
-
-	certFile, err := os.Create(file)
-	if err != nil {
-		return nil, err
-	}
-	defer certFile.Close()
-
-	err = pem.Encode(certFile, &pem.Block{Type: "CERTIFICATE", Bytes: derCert})
-	if err != nil {
-		return nil, err
-	}
-
-	cert, err = x509.ParseCertificate(derCert)
-	if err != nil {
-		return nil, err
-	}
-
-	return cert, nil
-}
-
 func main() {
 	var (
-		// Predefined variables
 		err     error
-		runHook bool
+		runHook bool        // Should I run the deploy-hook
 		domains stringFlags // All domains listed by -d flag
 
 		userDir, _ = os.UserHomeDir()                 // User home directory
 		configDir  = path.Join(userDir, configFolder) // Full path to config folder
 
 		// Flags
-		help         = flag.Bool("help", false, "")                           // Help flag
-		version      = flag.Bool("version", false, "")                        // Version flag
+		helpFlag     = flag.Bool("help", false, "")                           // Help flag
+		versionFlag  = flag.Bool("version", false, "")                        // Version flag
 		rootCertFlag = flag.String("ca", "", "")                              // Path to CA certificate
 		rootKeyFlag  = flag.String("ca-key", "", "")                          // Path to CA key
 		csrFlag      = flag.String("csr", "", "")                             // Path to CSR
 		csrKeyFlag   = flag.String("csr-key", "", "")                         // Path to CSR key
 		certFlag     = flag.String("cert", "", "")                            // Path to certificate
-		certKeyFlag  = flag.String("key", "", "")                             // Path to key
+		certKeyFlag  = flag.String("cert-key", "", "")                        // Path to key
 		renew        = flag.Bool("renew", false, "")                          // If the certificate should just be renewed in-place
 		hookFlag     = flag.String("deploy-hook", "", "")                     // Command to execute after the deploy has been completed
 		org          = flag.String("org", "GSCert Security Certificates", "") // Custom organization name
-		bits         = flag.Int("b", minBits, "")                             // Number of bits for the key
 
 		// Serialnumbers
 		serialNumberLimit = new(big.Int).Lsh(big.NewInt(1), 128)
@@ -328,9 +122,9 @@ func main() {
 		certSerial, _     = rand.Int(rand.Reader, serialNumberLimit)
 
 		// CA
-		rootKey  *rsa.PrivateKey
+		rootKey  *ecdsa.PrivateKey
 		rootCert *x509.Certificate
-		rootTmpl = x509.Certificate{
+		rootTmpl = &x509.Certificate{
 			NotBefore:    time.Now().UTC().AddDate(0, 0, -1),
 			NotAfter:     time.Now().UTC().AddDate(10, 0, 0),
 			SerialNumber: rootSerial,
@@ -345,8 +139,9 @@ func main() {
 		}
 
 		// Certificate
-		certKey  *rsa.PrivateKey
-		certTmpl = x509.Certificate{
+		certKey  *ecdsa.PrivateKey
+		cert     *x509.Certificate
+		certTmpl = &x509.Certificate{
 			NotBefore:    time.Now().UTC().AddDate(0, 0, -1),
 			NotAfter:     time.Now().UTC().AddDate(1, 0, 0),
 			SerialNumber: certSerial,
@@ -358,8 +153,9 @@ func main() {
 		}
 
 		// CSR
-		csrKey  *rsa.PrivateKey
-		csrTmpl = x509.CertificateRequest{
+		csrKey *ecdsa.PrivateKey
+		//csr     *x509.CertificateRequest
+		csrTmpl = &x509.CertificateRequest{
 			Subject: pkix.Name{
 				CommonName:         *org,
 				Country:            []string{"IT"},
@@ -368,28 +164,30 @@ func main() {
 				Organization:       []string{*org},
 				OrganizationalUnit: []string{"IT"},
 			},
-			SignatureAlgorithm: x509.SHA256WithRSA,
+			SignatureAlgorithm: x509.ECDSAWithSHA512,
 		}
 	)
 
+	// Parsing flags
 	flag.Var(&domains, "d", "")
 	flag.Usage = func() {
 		fmt.Fprint(flag.CommandLine.Output(), usage)
 	}
-
 	flag.Parse()
 
-	// Help Flag
-	if *help {
+	// Print help
+	if *helpFlag {
 		fmt.Println(usage)
 		return
 	}
 
-	// Version Flag
-	if *version {
-		fmt.Println("Version:", versionText)
+	// Show version
+	if *versionFlag {
+		fmt.Println("Version: v", version)
 		return
 	}
+
+	// Checks before executing the program //
 
 	// Checks if config folder exists
 	if _, err := os.Stat(configDir); errors.Is(err, fs.ErrNotExist) {
@@ -399,38 +197,27 @@ func main() {
 			fmt.Println("could not create .gscert config folder in home directory:", err)
 			return
 		}
+
 	}
 
-	// Root Certificate //
-
+	// Flag was not provided, using the default
 	if *rootKeyFlag == "" {
 		*rootKeyFlag = path.Join(configDir, dRootKeyName)
 	}
 
-	rootKey, err = genReadKey(*rootKeyFlag, *bits)
-	if err != nil {
-		fmt.Println("could not generate Root key:", err)
-		return
-	}
-
+	// Flag was not provided, using the default
 	if *rootCertFlag == "" {
 		*rootCertFlag = path.Join(configDir, dRootCertName)
 	}
 
-	rootCert, err = genReadCert(*rootCertFlag, rootKey, nil, &rootTmpl, nil)
-	if err != nil {
-		fmt.Println("could not generate Root certificate:", err)
-		return
-	}
-
-	// Certificate //
-
+	// If exists one and not the other
 	if (*certKeyFlag == "" || *certFlag == "") && !(*certKeyFlag == "" && *certFlag == "") {
 		fmt.Println("if one of cert or key flag is provided, the other must be provided too")
 		return
 	}
 
-	if !*renew && (*certKeyFlag != "" || *certFlag != "") && len(domains) == 0 { // If no domain is provided
+	// If no domain is provided
+	if !*renew && (*certKeyFlag != "" || *certFlag != "") && len(domains) == 0 {
 		fmt.Println("if cert and key flags are provided, domains must be provided too")
 		return
 	} else if (*certKeyFlag == "" && *certFlag == "") && len(domains) >= 1 { // If no cert and key flags are provided, but domains are provided
@@ -438,23 +225,244 @@ func main() {
 		*certFlag = "cert.pem"
 	}
 
-	if *certKeyFlag != "" {
+	// Csr and key are provided but not domains found
+	if *csrKeyFlag != "" && *csrFlag != "" && len(domains) == 0 {
+		fmt.Println("if csr and key flags are provided, domains must be provided too")
+		return
+	}
 
-		certKey, err = genReadKey(*certKeyFlag, *bits)
+	// Root Key //
+
+	// Root key exists, I read it
+	if _, err := os.Stat(*rootKeyFlag); errors.Is(err, fs.ErrExist) {
+
+		// Reading file found
+		fileContents, err := os.ReadFile(*rootKeyFlag)
 		if err != nil {
-			fmt.Println("could not generate certificate key:", err)
+			fmt.Println("could not read root private key file:", err)
+			return
+		}
+
+		// Decoding the key
+		block, _ := pem.Decode(fileContents)
+		if block.Type != "EC PRIVATE KEY" {
+			fmt.Println(*rootKeyFlag, "input file is not a private key, found:", block.Type)
+			return
+		}
+
+		// Parse the private key
+		rootKey, err = x509.ParseECPrivateKey(block.Bytes)
+		if err != nil {
+			fmt.Println("could not parse the root private key:", err)
+			return
+		}
+
+	} else {
+
+		// Generating a new key
+		rootKey, err = ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+		if err != nil {
+			fmt.Println("could not generate root private key:", err)
+			return
+		}
+
+		// Opening key file
+		file, err := os.Create(*rootKeyFlag)
+		if err != nil {
+			fmt.Println("could not create root private key file:", err)
+			return
+		}
+		defer file.Close()
+
+		keyBytes, _ := x509.MarshalECPrivateKey(rootKey)
+
+		// Writing to it
+		err = pem.Encode(file, &pem.Block{
+			Type:  "EC PRIVATE KEY",
+			Bytes: keyBytes,
+		})
+		if err != nil {
+			fmt.Println("could not write root private key file:", err)
 			return
 		}
 
 	}
 
+	// Root Certificate //
+
+	// If file exists, I read it
+	if _, err = os.Stat(*rootCertFlag); errors.Is(err, fs.ErrExist) {
+
+		// Reading file
+		fileContents, err := os.ReadFile(*rootCertFlag)
+		if err != nil {
+			fmt.Println("could not read root certificate file:", err)
+			return
+		}
+
+		// Decoding file contents
+		pem, _ := pem.Decode(fileContents)
+		if pem.Type != "CERTIFICATE" {
+			fmt.Println(*rootCertFlag, "input file is not a certificate, found: ", pem.Type)
+			return
+		}
+
+		// Parsing certificate contents
+		rootCert, err = x509.ParseCertificate(pem.Bytes)
+		if err != nil {
+			fmt.Println("could not parse root certificate:", err)
+			return
+		}
+
+	} else {
+
+		// Generating the certificate
+		fileContents, err := x509.CreateCertificate(rand.Reader, rootTmpl, rootTmpl, &rootKey.PublicKey, rootKey)
+		if err != nil {
+			fmt.Println("could not create root certificate:", err)
+			return
+		}
+
+		// Creating the certificate file
+		file, err := os.Create(*rootCertFlag)
+		if err != nil {
+			fmt.Println("could not create root certificate file:", err)
+			return
+		}
+		defer file.Close()
+
+		// Encoding the certificate contents
+		err = pem.Encode(file, &pem.Block{Type: "CERTIFICATE", Bytes: fileContents})
+		if err != nil {
+			fmt.Println("could not write root certificate file", err)
+			return
+		}
+
+		rootCert, err = x509.ParseCertificate(fileContents)
+		if err != nil {
+			fmt.Println("failed parsing the generated root certificate:", err)
+			return
+		}
+	}
+
+	// Certificate Key //
+
+	if *certKeyFlag != "" {
+
+		// Certificate key exists, I read it
+		if _, err := os.Stat(*certKeyFlag); errors.Is(err, fs.ErrExist) {
+
+			// Reading file found
+			fileContents, err := os.ReadFile(*certKeyFlag)
+			if err != nil {
+				fmt.Println("could not read cert private key file:", err)
+				return
+			}
+
+			// Decoding the key
+			pem, _ := pem.Decode(fileContents)
+			if pem.Type != "EC PRIVATE KEY" {
+				fmt.Println(*certKeyFlag, "input file is not a private key, found:", pem.Type)
+				return
+			}
+
+			// Parse the private key
+			certKey, err = x509.ParseECPrivateKey(pem.Bytes)
+			if err != nil {
+				fmt.Println("could not parse the private key:", err)
+				return
+			}
+
+		} else {
+
+			// Generating a new key
+			certKey, err = ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+			if err != nil {
+				fmt.Println("could not generate cert private key:", err)
+				return
+			}
+
+			// Opening key file
+			file, err := os.Create(*certKeyFlag)
+			if err != nil {
+				fmt.Println("could not create cert private key file:", err)
+				return
+			}
+			defer file.Close()
+
+			keyBytes, _ := x509.MarshalECPrivateKey(certKey)
+
+			// Writing to it
+			err = pem.Encode(file, &pem.Block{
+				Type:  "EC PRIVATE KEY",
+				Bytes: keyBytes,
+			})
+			if err != nil {
+				fmt.Println("could not write cert private key file:", err)
+				return
+			}
+
+		}
+
+	}
+
+	// Certificate //
+
 	if *certFlag != "" {
 
 		if *renew {
 
-			_, err = renewCert(*certFlag, certKey, rootKey, &certTmpl, rootCert)
+			if _, err = os.Stat(*certFlag); errors.Is(err, fs.ErrNotExist) {
+				fmt.Println("could not find cert file:", err)
+				return
+			}
+
+			// Reading the old certificate
+
+			fileContents, err := os.ReadFile(*certFlag)
 			if err != nil {
-				fmt.Println("could not renew certificate:", err)
+				fmt.Println("could not read cert file:", err)
+				return
+			}
+
+			pemm, _ := pem.Decode(fileContents)
+			if pemm.Type != "CERTIFICATE" {
+				fmt.Println("input file is not a certificate, found:", pemm.Type)
+				return
+			}
+
+			cert, err = x509.ParseCertificate(pemm.Bytes)
+			if err != nil {
+				fmt.Println("could not parse the previous certificate:", err)
+				return
+			}
+
+			certTmpl.DNSNames = cert.DNSNames
+
+			// Recreating the certificate
+
+			fileContents, err = x509.CreateCertificate(rand.Reader, certTmpl, rootTmpl, &certKey.PublicKey, certKey)
+			if err != nil {
+				fmt.Println("could not generate the new certificate:", err)
+				return
+			}
+
+			file, err := os.Create(*certFlag)
+			if err != nil {
+				fmt.Println("could not create the new certificate file:", err)
+				return
+			}
+			defer file.Close()
+
+			err = pem.Encode(file, &pem.Block{Type: "CERTIFICATE", Bytes: fileContents})
+			if err != nil {
+				fmt.Println("could not encode the new certificate:", err)
+				return
+			}
+
+			cert, err = x509.ParseCertificate(fileContents)
+			if err != nil {
+				fmt.Println("could not parse the new certificate:", err)
 				return
 			}
 
@@ -464,40 +472,134 @@ func main() {
 
 			certTmpl.DNSNames = domains
 
-			_, err = genReadCert(*certFlag, certKey, rootKey, &certTmpl, rootCert)
-			if err != nil {
-				fmt.Println("could not generate certificate:", err)
-				return
+			// If file exists, I read it
+			if _, err = os.Stat(*certFlag); errors.Is(err, fs.ErrExist) {
+
+				// Reading file
+				fileContents, err := os.ReadFile(*certFlag)
+				if err != nil {
+					fmt.Println("could not read certificate file:", err)
+					return
+				}
+
+				// Decoding file contents
+				pem, _ := pem.Decode(fileContents)
+				if pem.Type != "CERTIFICATE" {
+					fmt.Println(*certFlag, "input file is not a certificate, found: ", pem.Type)
+					return
+				}
+
+				// Parsing certificate contents
+				cert, err = x509.ParseCertificate(pem.Bytes)
+				if err != nil {
+					fmt.Println("could not parse certificate:", err)
+					return
+				}
+
+			} else {
+
+				// Generating the certificate
+				fileContents, err := x509.CreateCertificate(rand.Reader, certTmpl, rootCert, &certKey.PublicKey, &rootKey)
+				if err != nil {
+					fmt.Println("could not create certificate:", err)
+					return
+				}
+
+				// Creating the certificate file
+				file, err := os.Create(*certFlag)
+				if err != nil {
+					fmt.Println("could not create certificate file:", err)
+					return
+				}
+				defer file.Close()
+
+				// Encoding the certificate contents
+				err = pem.Encode(file, &pem.Block{Type: "CERTIFICATE", Bytes: fileContents})
+				if err != nil {
+					fmt.Println("could not write certificate file", err)
+					return
+				}
+
+				cert, err = x509.ParseCertificate(fileContents)
+				if err != nil {
+					fmt.Println("failed parsing the generated certificate:", err)
+					return
+				}
 			}
-
 		}
-
 	}
 
 	// CSR //
 
-	if *csrKeyFlag != "" && *csrFlag != "" && len(domains) == 0 {
-		fmt.Println("if csr and key flags are provided, domains must be provided too")
-		return
-	}
-
-	if *csrKeyFlag == "" {
-		*csrKeyFlag = "csr-key.pem"
-	}
-
 	if *csrFlag != "" {
 
-		csrKey, err = genReadKey(*csrKeyFlag, *bits)
+		// CSR Key //
+
+		if *csrKeyFlag == "" {
+			*csrKeyFlag = "csr-key.pem"
+		}
+
+		// File already exists
+		if _, err = os.Stat(*csrFlag); errors.Is(err, fs.ErrExist) {
+			fmt.Println("csr key already exists, please choose a new name:", err)
+			return
+		}
+
+		// Generating a new key
+		csrKey, err = ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 		if err != nil {
-			fmt.Println("could not generate csr key:", err)
+			fmt.Println("could not generate cert private key:", err)
+			return
+		}
+
+		// Opening key file
+		file, err := os.Create(*csrKeyFlag)
+		if err != nil {
+			fmt.Println("could not create cert private key file:", err)
+			return
+		}
+		defer file.Close()
+
+		keyBytes, _ := x509.MarshalECPrivateKey(certKey)
+
+		// Writing to it
+		err = pem.Encode(file, &pem.Block{
+			Type:  "EC PRIVATE KEY",
+			Bytes: keyBytes,
+		})
+		if err != nil {
+			fmt.Println("could not write cert private key file:", err)
 			return
 		}
 
 		csrTmpl.DNSNames = domains
 
-		_, err = genReadCSR(*csrFlag, csrKey, &csrTmpl)
+		// CSR Certificate //
+
+		// File already exists
+		if _, err = os.Stat(*csrFlag); errors.Is(err, fs.ErrExist) {
+			fmt.Println("csr certificate already exists, please choose a new name:", err)
+			return
+		}
+
+		fileContents, err := x509.CreateCertificateRequest(rand.Reader, csrTmpl, csrKey)
 		if err != nil {
-			fmt.Println("could not generate CSR:", err)
+			return
+		}
+
+		file, err = os.Create(*csrFlag)
+		if err != nil {
+			return
+		}
+		defer file.Close()
+
+		err = pem.Encode(file, &pem.Block{Type: "CERTIFICATE REQUEST", Bytes: fileContents})
+		if err != nil {
+			return
+		}
+
+		_, err = x509.ParseCertificateRequest(fileContents)
+		if err != nil {
 			return
 		}
 

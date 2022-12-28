@@ -30,7 +30,7 @@ const (
 	dcsrName = `csr.pem`
 
 	usage = `usage:
-	certbot [options] [-d DOMAIN] [-d DOMAIN] ...
+	gscert [options] [-d DOMAIN] [-d DOMAIN] ...
 
 Gscert can help generate, use and renew self-signed certificates.
 
@@ -473,6 +473,8 @@ func main() {
 			}
 
 			certTmpl.DNSNames = cert.DNSNames
+
+			// Checks the old certificate expiration date
 
 			// Recreating the certificate
 

@@ -1,22 +1,26 @@
 # gscert - Generate self certificates
-This project got inspired by https://github.com/FiloSottile/mkcert
+Gscert can help generate, use and renew self-signed certificates.
 
-I wanted something that could work exactly like certbot to deploy self-signed certificates
-
-# What it can do
+# Features
 ```
-Generate a CA Certificate with custom parameters
-Generate a Certificate from a new or imported CA with custom parameters
-Generate a CSR
-Auto-regenerate certificates near their expiration date and execute commands on success with a post-hook
+Generation of:
+    - Certification Authority
+    - Certificate from a Certification Authority
+    - Certificate Sign Request
+
+Renew certificates 1 month prior to their expiration date
+Post-success hooks (nginx, apache2 or custom command)
 ```
 
 # Usage
 
+```sh
 gscert [options] [-d DOMAIN] [-d DOMAIN] ...
+```
 
-Gscert can help generate, use and renew self-signed certificates.
+If no custom Certificate Authority is provided (private key included), a new Certificate Authority will be generated in the configuration folder, it defaults to the user home directory
 
+```
 Options:
 	-help
 		prints this help message
@@ -62,16 +66,11 @@ Options:
 
 	-work-dir WORK_PATH
 		change working directory inside the provided directory (default: current directory)
-
-
-
-On execution if no custom Certificate Authority is provided (private key included), a new Certificate Authority will be generated
-	in the ` + configFolder + ` folder inside the user home directory (~/` + configFolder + `)
-
-
+```
 
 Examples:
 
+```sh
 	$ gscert -d example.com -d example.org
 	Generates a certificate for the provided domains with default CA
 
@@ -80,3 +79,10 @@ Examples:
 
 	$ gscert -key cert-key.pem -cert cert.pem -d example.com
 	Generates a certificate for the provided domains with a custom CA
+```
+
+# Inspired by
+
+This project got inspired by https://github.com/FiloSottile/mkcert
+
+I wanted something that could work exactly like certbot to deploy self-signed certificates

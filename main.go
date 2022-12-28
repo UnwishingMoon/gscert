@@ -32,14 +32,11 @@ const (
 	usage = `usage:
 	gscert [options] [-d DOMAIN] [-d DOMAIN] ...
 
-Gscert can help generate, use and renew self-signed certificates.
+Gscert can help you generate, use and renew self-signed certificates.
 
 Options:
 	-help
 		prints this help message
-
-	-version
-		prints the program version
 
 	-ca CA_PATH
 		path to a root certificate, if it does not exist, it will be generated in the provided position
@@ -54,16 +51,17 @@ Options:
 		path to the private key used to generate the certificate, if it does not exist, it will be generated in the provided position
 
 	-csr CSR_PATH
-		path to a certificate signing request, if it does not exists, it will be exported in the provided position
+		path to a certificate signing request, if it does not exist, it will be exported in the provided position
 
 	-csr-key CSR_KEY_PATH
-		path to the private key used for generating the certificate signing request, if it does not exists, it will be generated in the provided position
+		path to the private key used for generating the certificate signing request, if it does not exist, it will be generated in the provided position
 
 	-renew
-		provide the flag if you want the certificates to be renewed in-place
+		provides the flag if you want the certificates to be renewed in-place
 
 	-org ORGANIZATION
-		organization name to use during certificate creation (Default: "GSCert Security Certificates")
+		organization name to use during the certificate creation (Default: "GSCert Security Certificates")
+
 
 	-nginx
 		reloads nginx after successful certificate generation or renewal
@@ -72,19 +70,17 @@ Options:
 		reloads apache2 after successful certificate generation or renewal
 
 	-post-hook HOOK
-		command or script to run after the certificate is generated, only executed on successul runs
+		command or script to run after the certificate is generated, only executed on successfull runs
 
 	-config-dir CONFIG_DIR
-		configuration path where CA files will be generated / read if not provided (default: ~/` + configFolder + `)
+		configuration path where CA files will be generated, read if not provided (default: ~/` + configFolder + `)
 
 	-work-dir WORK_PATH
 		change working directory inside the provided directory (default: current directory)
 
 
 
-On execution if no custom Certificate Authority is provided (private key included), a new Certificate Authority will be generated
-	in the ` + configFolder + ` folder inside the user home directory (~/` + configFolder + `)
-
+If no custom Certificate Authority is provided (private key included), a new Certificate Authority will be generated in the configuration folder (by default, it is located inside the home folder).
 
 
 Examples:
@@ -476,34 +472,38 @@ func main() {
 
 			// Checks the old certificate expiration date
 
-			// Recreating the certificate
+			if time.Until(cert.NotAfter) <= (time.Hour * 24 * 30) {
 
-			fileContents, err = x509.CreateCertificate(rand.Reader, &certTmpl, &rootTmpl, certKey.Public(), rootKey)
-			if err != nil {
-				fmt.Println("could not generate the new certificate:", err)
-				return
+				// Recreating the certificate
+
+				fileContents, err = x509.CreateCertificate(rand.Reader, &certTmpl, &rootTmpl, certKey.Public(), rootKey)
+				if err != nil {
+					fmt.Println("could not generate the new certificate:", err)
+					return
+				}
+
+				file, err := os.Create(*certFlag)
+				if err != nil {
+					fmt.Println("could not create the new certificate file:", err)
+					return
+				}
+				defer file.Close()
+
+				err = pem.Encode(file, &pem.Block{Type: "CERTIFICATE", Bytes: fileContents})
+				if err != nil {
+					fmt.Println("could not encode the new certificate:", err)
+					return
+				}
+
+				cert, err = x509.ParseCertificate(fileContents)
+				if err != nil {
+					fmt.Println("could not parse the new certificate:", err)
+					return
+				}
+
+				runHook = true
+
 			}
-
-			file, err := os.Create(*certFlag)
-			if err != nil {
-				fmt.Println("could not create the new certificate file:", err)
-				return
-			}
-			defer file.Close()
-
-			err = pem.Encode(file, &pem.Block{Type: "CERTIFICATE", Bytes: fileContents})
-			if err != nil {
-				fmt.Println("could not encode the new certificate:", err)
-				return
-			}
-
-			cert, err = x509.ParseCertificate(fileContents)
-			if err != nil {
-				fmt.Println("could not parse the new certificate:", err)
-				return
-			}
-
-			runHook = true
 
 		} else {
 

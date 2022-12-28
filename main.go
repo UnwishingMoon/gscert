@@ -338,13 +338,6 @@ func main() {
 			return
 		}
 
-		// Parsing certificate contents
-		/* rootCert, err = x509.ParseCertificate(pem.Bytes)
-		if err != nil {
-			fmt.Println("could not parse root certificate:", err)
-			return
-		} */
-
 	} else {
 
 		// Generating the certificate
@@ -369,11 +362,6 @@ func main() {
 			return
 		}
 
-		/* 		rootCert, err = x509.ParseCertificate(fileContents)
-		   		if err != nil {
-		   			fmt.Println("failed parsing the generated root certificate:", err)
-		   			return
-		   		} */
 	}
 
 	// Certificate Key //
@@ -526,13 +514,6 @@ func main() {
 					return
 				}
 
-				// Parsing certificate contents
-				/* cert, err = x509.ParseCertificate(pem.Bytes)
-				if err != nil {
-					fmt.Println("could not parse certificate:", err)
-					return
-				} */
-
 			} else {
 
 				// Generating the certificate
@@ -557,11 +538,6 @@ func main() {
 					return
 				}
 
-				/* cert, err = x509.ParseCertificate(fileContents)
-				if err != nil {
-					fmt.Println("failed parsing the generated certificate:", err)
-					return
-				} */
 			}
 		}
 	}

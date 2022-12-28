@@ -71,14 +71,14 @@ Options:
 Examples:
 
 ```sh
-	$ gscert -d example.com -d example.org
-	Generates a certificate for the provided domains with default CA
+$ gscert -d example.com -d example.org
+    Generates a certificate for the provided domains with default CA
 
-	$ gscert -ca-key rootkey.pem -ca rootcert.pem -d example.com
-	Generates a certificate for the provided domains with a custom CA
+$ gscert -ca-key rootkey.pem -ca rootcert.pem -d example.com
+    Generates a certificate for the provided domains with a custom CA
 
-	$ gscert -key cert-key.pem -cert cert.pem -d example.com
-	Generates a certificate for the provided domains with a custom CA
+$ gscert -key cert-key.pem -cert cert.pem -d example.com
+    Generates a certificate for the provided domains with a custom CA
 ```
 
 # Inspired by

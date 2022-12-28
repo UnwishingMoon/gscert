@@ -305,7 +305,7 @@ func main() {
 		}
 		defer file.Close()
 
-		keyBytes, _ := x509.MarshalPKCS8PrivateKey(rootKey)
+		keyBytes, _ := x509.MarshalECPrivateKey(rootKey)
 
 		// Writing to it
 		err = pem.Encode(file, &pem.Block{
@@ -409,7 +409,7 @@ func main() {
 			}
 			defer file.Close()
 
-			keyBytes, _ := x509.MarshalPKCS8PrivateKey(certKey)
+			keyBytes, _ := x509.MarshalECPrivateKey(certKey)
 
 			// Writing to it
 			err = pem.Encode(file, &pem.Block{
@@ -573,7 +573,7 @@ func main() {
 		}
 		defer file.Close()
 
-		keyBytes, _ := x509.MarshalPKCS8PrivateKey(certKey)
+		keyBytes, _ := x509.MarshalECPrivateKey(certKey)
 
 		// Writing to it
 		err = pem.Encode(file, &pem.Block{

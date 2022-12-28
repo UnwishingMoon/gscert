@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -10,7 +11,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/fs"
 	"math/big"
 	"os"
 	"os/exec"
@@ -19,57 +19,6 @@ import (
 )
 
 const (
-	usage = `Usage:
-
-	Options:
-	-help
-		Show this help message
-
-	-version
-		Show program version
-
-	-ca
-		Path to the root certificate
-
-	-ca-key
-		Path to the root private key
-
-	-cert
-		Path to the certificate
-
-	-cert-key
-		Path to the private key
-
-	-csr
-		Path to the certificate signing request
-
-	-csr-key
-		Path to the private key of the certificate signing request
-
-	-renew
-		If present attempt to renew the certificate in-place if it's going to expire in less than one month
-
-	-org
-		Organization name (Default: "GSCert Security Certificates")
-
-	-b
-		Change the bits of the key, can't be lower than the default (Default: 4096)
-
-	-deploy-hook
-		Path to a script or command to run after the certificate is generated (It is run only after a successfull renewal)
-
-
-	Examples:
-
-	$ gscert -d example.com -d example.org
-	Generates a certificate for the provided domains with default CA
-
-	$ gscert -ca-key rootkey.pem -ca rootcert.pem -d example.com
-	Generates a certificate for the provided domains with a custom CA
-
-	$ gscert -key cert-key.pem -cert cert.pem -d example.com
-	Generates a certificate for the provided domains with a custom CA`
-
 	configFolder = `.gscert`
 
 	dRootKeyName  = `root-key.pem`
@@ -79,42 +28,113 @@ const (
 	dCertName    = `cert.pem`
 
 	dcsrName = `csr.pem`
+
+	usage = `usage:
+	certbot [options] [-d DOMAIN] [-d DOMAIN] ...
+
+Gscert can help generate, use and renew self-signed certificates.
+
+Options:
+	-help
+		prints this help message
+
+	-version
+		prints the program version
+
+	-ca CA_PATH
+		path to a root certificate, if it does not exist, it will be generated in the provided position
+
+	-ca-key CA_KEY_PATH
+		path to the private key used to generate the root certificate, if it does not exist, it will be generated in the provided position
+
+	-cert CERT_PATH
+		path to a certificate, if it does not exist, it will be generated in the provided position
+
+	-cert-key CERT_KEY_PATH
+		path to the private key used to generate the certificate, if it does not exist, it will be generated in the provided position
+
+	-csr CSR_PATH
+		path to a certificate signing request, if it does not exists, it will be exported in the provided position
+
+	-csr-key CSR_KEY_PATH
+		path to the private key used for generating the certificate signing request, if it does not exists, it will be generated in the provided position
+
+	-renew
+		provide the flag if you want the certificates to be renewed in-place
+
+	-org ORGANIZATION
+		organization name to use during certificate creation (Default: "GSCert Security Certificates")
+
+	-nginx
+		reloads nginx after successful certificate generation or renewal
+
+	-apache
+		reloads apache2 after successful certificate generation or renewal
+
+	-post-hook HOOK
+		command or script to run after the certificate is generated, only executed on successul runs
+
+	-config-dir CONFIG_DIR
+		configuration path where CA files will be generated / read if not provided (default: ~/` + configFolder + `)
+
+	-work-dir WORK_PATH
+		change working directory inside the provided directory (default: current directory)
+
+
+
+On execution if no custom Certificate Authority is provided (private key included), a new Certificate Authority will be generated
+	in the ` + configFolder + ` folder inside the user home directory (~/` + configFolder + `)
+
+
+
+Examples:
+
+	$ gscert -d example.com -d example.org
+	Generates a certificate for the provided domains with default CA
+
+	$ gscert -ca-key rootkey.pem -ca rootcert.pem -d example.com
+	Generates a certificate for the provided domains with a custom CA
+
+	$ gscert -key cert-key.pem -cert cert.pem -d example.com
+	Generates a certificate for the provided domains with a custom CA
+
+`
 )
 
-var version string = "0.1"
+type domainFlags []string
 
-type stringFlags []string
-
-func (i *stringFlags) String() string {
+func (i *domainFlags) String() string {
 	return fmt.Sprintf("%v", *i)
 }
 
-func (i *stringFlags) Set(value string) error {
+func (i *domainFlags) Set(value string) error {
 	*i = append(*i, value)
 	return nil
 }
 
 func main() {
 	var (
-		err     error
-		runHook bool        // Should I run the deploy-hook
-		domains stringFlags // All domains listed by -d flag
-
-		userDir, _ = os.UserHomeDir()                 // User home directory
-		configDir  = path.Join(userDir, configFolder) // Full path to config folder
+		err       error
+		runHook   bool        // Should I run the deploy-hook
+		domains   domainFlags // All domains listed by -d flag
+		userDir   string      // Path to user home directory
+		configDir string      // Full path to config directory
 
 		// Flags
-		helpFlag     = flag.Bool("help", false, "")                           // Help flag
-		versionFlag  = flag.Bool("version", false, "")                        // Version flag
-		rootCertFlag = flag.String("ca", "", "")                              // Path to CA certificate
-		rootKeyFlag  = flag.String("ca-key", "", "")                          // Path to CA key
-		csrFlag      = flag.String("csr", "", "")                             // Path to CSR
-		csrKeyFlag   = flag.String("csr-key", "", "")                         // Path to CSR key
-		certFlag     = flag.String("cert", "", "")                            // Path to certificate
-		certKeyFlag  = flag.String("cert-key", "", "")                        // Path to key
-		renew        = flag.Bool("renew", false, "")                          // If the certificate should just be renewed in-place
-		hookFlag     = flag.String("deploy-hook", "", "")                     // Command to execute after the deploy has been completed
-		org          = flag.String("org", "GSCert Security Certificates", "") // Custom organization name
+		helpFlag      = flag.Bool("help", false, "")                           // Help flag
+		rootCertFlag  = flag.String("ca", "", "")                              // Path to CA certificate
+		rootKeyFlag   = flag.String("ca-key", "", "")                          // Path to CA key
+		csrFlag       = flag.String("csr", "", "")                             // Path to CSR
+		csrKeyFlag    = flag.String("csr-key", "", "")                         // Path to CSR key
+		certFlag      = flag.String("cert", "", "")                            // Path to certificate
+		certKeyFlag   = flag.String("cert-key", "", "")                        // Path to key
+		renewFlag     = flag.Bool("renew", false, "")                          // If the certificate should just be renewed in-place
+		nginxFlag     = flag.Bool("nginx", false, "")                          // Reloads nginx if provided and no configuration error is found
+		apacheFlag    = flag.Bool("apache", false, "")                         // Reloads apache if provided and no configuration error is found
+		postHookFlag  = flag.String("post-hook", "", "")                       // Command to execute after the deploy has been completed
+		org           = flag.String("org", "GSCert Security Certificates", "") // Custom organization name
+		workDirFlag   = flag.String("work-dir", "", "")                        // Path to working directory
+		configDirFlag = flag.String("config-dir", "", "")                      // Path to custom configuration directory
 
 		// Serialnumbers
 		serialNumberLimit = new(big.Int).Lsh(big.NewInt(1), 128)
@@ -122,47 +142,47 @@ func main() {
 		certSerial, _     = rand.Int(rand.Reader, serialNumberLimit)
 
 		// CA
-		rootKey  *ecdsa.PrivateKey
-		rootCert *x509.Certificate
-		rootTmpl = &x509.Certificate{
+		rootKey *ecdsa.PrivateKey
+		//rootCert *x509.Certificate
+		rootTmpl = x509.Certificate{
 			NotBefore:    time.Now().UTC().AddDate(0, 0, -1),
 			NotAfter:     time.Now().UTC().AddDate(10, 0, 0),
 			SerialNumber: rootSerial,
 			Subject: pkix.Name{
-				Organization: []string{*org},
-				CommonName:   *org,
+				Organization:       []string{*org},
+				OrganizationalUnit: []string{*org},
+				CommonName:         *org,
 			},
 			BasicConstraintsValid: true,
 			IsCA:                  true,
-			KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+			KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 			ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		}
 
 		// Certificate
-		certKey  *ecdsa.PrivateKey
-		cert     *x509.Certificate
-		certTmpl = &x509.Certificate{
+		certKey *ecdsa.PrivateKey
+		//cert     *x509.Certificate
+		certTmpl = x509.Certificate{
 			NotBefore:    time.Now().UTC().AddDate(0, 0, -1),
 			NotAfter:     time.Now().UTC().AddDate(1, 0, 0),
 			SerialNumber: certSerial,
 			Subject: pkix.Name{
-				Organization: []string{*org},
-				CommonName:   *org,
+				Organization:       []string{*org},
+				CommonName:         *org,
+				OrganizationalUnit: []string{*org},
 			},
 			BasicConstraintsValid: true,
+			IsCA:                  false,
+			KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 		}
 
 		// CSR
-		csrKey *ecdsa.PrivateKey
+		csrKey crypto.PrivateKey
 		//csr     *x509.CertificateRequest
-		csrTmpl = &x509.CertificateRequest{
+		csrTmpl = x509.CertificateRequest{
 			Subject: pkix.Name{
-				CommonName:         *org,
-				Country:            []string{"IT"},
-				Province:           []string{"Italy"},
-				Locality:           []string{"Italy"},
-				Organization:       []string{*org},
-				OrganizationalUnit: []string{"IT"},
+				CommonName:   *org,
+				Organization: []string{*org},
 			},
 			SignatureAlgorithm: x509.ECDSAWithSHA512,
 		}
@@ -177,55 +197,70 @@ func main() {
 
 	// Print help
 	if *helpFlag {
-		fmt.Println(usage)
-		return
-	}
-
-	// Show version
-	if *versionFlag {
-		fmt.Println("Version: v", version)
+		fmt.Print(usage)
 		return
 	}
 
 	// Checks before executing the program //
 
-	// Checks if config folder exists
-	if _, err := os.Stat(configDir); errors.Is(err, fs.ErrNotExist) {
+	if *configDirFlag == "" { // Full path to config folder
 
+		userDir, err = os.UserHomeDir() // if user home directory is not defined
+		if err != nil {
+			userDir = os.TempDir() // Overwrite user directory with the temp system directory
+		}
+
+		configDir = path.Join(userDir, configFolder)
+	} else {
+		configDir = path.Join(*configDirFlag, configFolder) // Using user provided config folder
+	}
+
+	// Checks if config folder exists
+	if _, err := os.Stat(configDir); errors.Is(err, os.ErrNotExist) {
+
+		// Creating config folder if does not exists
 		err := os.Mkdir(configDir, 0755)
 		if err != nil {
-			fmt.Println("could not create .gscert config folder in home directory:", err)
+			fmt.Println("could not create .gscert config folder in user home directory:", err)
 			return
 		}
 
 	}
 
-	// Flag was not provided, using the default
+	// Changing inside user provided directory if provided
+	if *workDirFlag != "" {
+		err = os.Chdir(*workDirFlag)
+		if err != nil {
+			*workDirFlag = ""
+		}
+	}
+
+	// FRoot key flag was not provided, using the default
 	if *rootKeyFlag == "" {
 		*rootKeyFlag = path.Join(configDir, dRootKeyName)
 	}
 
-	// Flag was not provided, using the default
+	// Root certificate flag was not provided, using the default
 	if *rootCertFlag == "" {
 		*rootCertFlag = path.Join(configDir, dRootCertName)
 	}
 
-	// If exists one and not the other
+	// If a certificate flag exists and not the other
 	if (*certKeyFlag == "" || *certFlag == "") && !(*certKeyFlag == "" && *certFlag == "") {
 		fmt.Println("if one of cert or key flag is provided, the other must be provided too")
 		return
 	}
 
-	// If no domain is provided
-	if !*renew && (*certKeyFlag != "" || *certFlag != "") && len(domains) == 0 {
+	// If is not a renew but certiticates flags are provided without domains
+	if !*renewFlag && (*certKeyFlag != "" || *certFlag != "") && len(domains) == 0 {
 		fmt.Println("if cert and key flags are provided, domains must be provided too")
 		return
-	} else if (*certKeyFlag == "" && *certFlag == "") && len(domains) >= 1 { // If no cert and key flags are provided, but domains are provided
+	} else if (*certKeyFlag == "" && *certFlag == "") && len(domains) >= 1 { // If no certificates flags are provided, but domains are provided
 		*certKeyFlag = "key.pem"
 		*certFlag = "cert.pem"
 	}
 
-	// Csr and key are provided but not domains found
+	// Csr and key are provided but no domains found
 	if *csrKeyFlag != "" && *csrFlag != "" && len(domains) == 0 {
 		fmt.Println("if csr and key flags are provided, domains must be provided too")
 		return
@@ -234,7 +269,7 @@ func main() {
 	// Root Key //
 
 	// Root key exists, I read it
-	if _, err := os.Stat(*rootKeyFlag); errors.Is(err, fs.ErrExist) {
+	if _, err := os.Stat(*rootKeyFlag); err == nil {
 
 		// Reading file found
 		fileContents, err := os.ReadFile(*rootKeyFlag)
@@ -274,7 +309,7 @@ func main() {
 		}
 		defer file.Close()
 
-		keyBytes, _ := x509.MarshalECPrivateKey(rootKey)
+		keyBytes, _ := x509.MarshalPKCS8PrivateKey(rootKey)
 
 		// Writing to it
 		err = pem.Encode(file, &pem.Block{
@@ -291,7 +326,7 @@ func main() {
 	// Root Certificate //
 
 	// If file exists, I read it
-	if _, err = os.Stat(*rootCertFlag); errors.Is(err, fs.ErrExist) {
+	if _, err = os.Stat(*rootCertFlag); err == nil {
 
 		// Reading file
 		fileContents, err := os.ReadFile(*rootCertFlag)
@@ -308,16 +343,16 @@ func main() {
 		}
 
 		// Parsing certificate contents
-		rootCert, err = x509.ParseCertificate(pem.Bytes)
+		/* rootCert, err = x509.ParseCertificate(pem.Bytes)
 		if err != nil {
 			fmt.Println("could not parse root certificate:", err)
 			return
-		}
+		} */
 
 	} else {
 
 		// Generating the certificate
-		fileContents, err := x509.CreateCertificate(rand.Reader, rootTmpl, rootTmpl, &rootKey.PublicKey, rootKey)
+		fileContents, err := x509.CreateCertificate(rand.Reader, &rootTmpl, &rootTmpl, rootKey.Public(), rootKey)
 		if err != nil {
 			fmt.Println("could not create root certificate:", err)
 			return
@@ -338,11 +373,11 @@ func main() {
 			return
 		}
 
-		rootCert, err = x509.ParseCertificate(fileContents)
-		if err != nil {
-			fmt.Println("failed parsing the generated root certificate:", err)
-			return
-		}
+		/* 		rootCert, err = x509.ParseCertificate(fileContents)
+		   		if err != nil {
+		   			fmt.Println("failed parsing the generated root certificate:", err)
+		   			return
+		   		} */
 	}
 
 	// Certificate Key //
@@ -350,7 +385,7 @@ func main() {
 	if *certKeyFlag != "" {
 
 		// Certificate key exists, I read it
-		if _, err := os.Stat(*certKeyFlag); errors.Is(err, fs.ErrExist) {
+		if _, err := os.Stat(*certKeyFlag); err == nil {
 
 			// Reading file found
 			fileContents, err := os.ReadFile(*certKeyFlag)
@@ -376,7 +411,7 @@ func main() {
 		} else {
 
 			// Generating a new key
-			certKey, err = ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+			certKey, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 			if err != nil {
 				fmt.Println("could not generate cert private key:", err)
 				return
@@ -390,7 +425,7 @@ func main() {
 			}
 			defer file.Close()
 
-			keyBytes, _ := x509.MarshalECPrivateKey(certKey)
+			keyBytes, _ := x509.MarshalPKCS8PrivateKey(certKey)
 
 			// Writing to it
 			err = pem.Encode(file, &pem.Block{
@@ -410,9 +445,9 @@ func main() {
 
 	if *certFlag != "" {
 
-		if *renew {
+		if *renewFlag {
 
-			if _, err = os.Stat(*certFlag); errors.Is(err, fs.ErrNotExist) {
+			if _, err = os.Stat(*certFlag); errors.Is(err, os.ErrNotExist) {
 				fmt.Println("could not find cert file:", err)
 				return
 			}
@@ -431,7 +466,7 @@ func main() {
 				return
 			}
 
-			cert, err = x509.ParseCertificate(pemm.Bytes)
+			cert, err := x509.ParseCertificate(pemm.Bytes)
 			if err != nil {
 				fmt.Println("could not parse the previous certificate:", err)
 				return
@@ -441,7 +476,7 @@ func main() {
 
 			// Recreating the certificate
 
-			fileContents, err = x509.CreateCertificate(rand.Reader, certTmpl, rootTmpl, &certKey.PublicKey, certKey)
+			fileContents, err = x509.CreateCertificate(rand.Reader, &certTmpl, &rootTmpl, certKey.Public(), rootKey)
 			if err != nil {
 				fmt.Println("could not generate the new certificate:", err)
 				return
@@ -473,7 +508,7 @@ func main() {
 			certTmpl.DNSNames = domains
 
 			// If file exists, I read it
-			if _, err = os.Stat(*certFlag); errors.Is(err, fs.ErrExist) {
+			if _, err = os.Stat(*certFlag); err == nil {
 
 				// Reading file
 				fileContents, err := os.ReadFile(*certFlag)
@@ -490,16 +525,16 @@ func main() {
 				}
 
 				// Parsing certificate contents
-				cert, err = x509.ParseCertificate(pem.Bytes)
+				/* cert, err = x509.ParseCertificate(pem.Bytes)
 				if err != nil {
 					fmt.Println("could not parse certificate:", err)
 					return
-				}
+				} */
 
 			} else {
 
 				// Generating the certificate
-				fileContents, err := x509.CreateCertificate(rand.Reader, certTmpl, rootCert, &certKey.PublicKey, &rootKey)
+				fileContents, err := x509.CreateCertificate(rand.Reader, &certTmpl, &rootTmpl, certKey.Public(), rootKey)
 				if err != nil {
 					fmt.Println("could not create certificate:", err)
 					return
@@ -520,11 +555,11 @@ func main() {
 					return
 				}
 
-				cert, err = x509.ParseCertificate(fileContents)
+				/* cert, err = x509.ParseCertificate(fileContents)
 				if err != nil {
 					fmt.Println("failed parsing the generated certificate:", err)
 					return
-				}
+				} */
 			}
 		}
 	}
@@ -540,13 +575,13 @@ func main() {
 		}
 
 		// File already exists
-		if _, err = os.Stat(*csrFlag); errors.Is(err, fs.ErrExist) {
+		if _, err = os.Stat(*csrFlag); err == nil {
 			fmt.Println("csr key already exists, please choose a new name:", err)
 			return
 		}
 
 		// Generating a new key
-		csrKey, err = ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+		csrKey, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		if err != nil {
 			fmt.Println("could not generate cert private key:", err)
 			return
@@ -560,7 +595,7 @@ func main() {
 		}
 		defer file.Close()
 
-		keyBytes, _ := x509.MarshalECPrivateKey(certKey)
+		keyBytes, _ := x509.MarshalPKCS8PrivateKey(certKey)
 
 		// Writing to it
 		err = pem.Encode(file, &pem.Block{
@@ -577,12 +612,12 @@ func main() {
 		// CSR Certificate //
 
 		// File already exists
-		if _, err = os.Stat(*csrFlag); errors.Is(err, fs.ErrExist) {
+		if _, err = os.Stat(*csrFlag); err == nil {
 			fmt.Println("csr certificate already exists, please choose a new name:", err)
 			return
 		}
 
-		fileContents, err := x509.CreateCertificateRequest(rand.Reader, csrTmpl, csrKey)
+		fileContents, err := x509.CreateCertificateRequest(rand.Reader, &csrTmpl, csrKey)
 		if err != nil {
 			return
 		}
@@ -605,10 +640,32 @@ func main() {
 
 	}
 
-	// Deploy Hook //
+	// Post Hooks //
 
-	if runHook && *hookFlag != "" {
-		cmd := exec.Command("/bin/sh", "-c", *hookFlag)
+	if !runHook {
+		return
+	}
+
+	if *nginxFlag {
+		cmd := exec.Command("/bin/sh", "-c", "nginx", "-s", "reload")
+
+		if err := cmd.Run(); err != nil {
+			fmt.Println("certificates deployed but could not run nginx post hook:", err)
+			return
+		}
+	}
+
+	if *apacheFlag {
+		cmd := exec.Command("/bin/sh", "-c", "apache2ctl", "-k", "graceful")
+
+		if err := cmd.Run(); err != nil {
+			fmt.Println("certificates deployed but could not run apache post hook:", err)
+			return
+		}
+	}
+
+	if *postHookFlag != "" {
+		cmd := exec.Command("/bin/sh", "-c", *postHookFlag)
 
 		if err := cmd.Run(); err != nil {
 			fmt.Println("could not execute deploy hook:", err)

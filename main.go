@@ -208,7 +208,7 @@ func main() {
 
 		configDir = path.Join(userDir, configFolder)
 	} else {
-		configDir = path.Join(*configDirFlag, configFolder) // Using user provided config folder
+		configDir = *configDirFlag // Using user provided config folder
 	}
 
 	// Checks if config folder exists

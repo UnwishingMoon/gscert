@@ -34,7 +34,7 @@ Options:
 -cert CERT_PATH
     path to a certificate, if it does not exist, it will be generated in the provided position
 
--cert-key CERT_KEY_PATH
+-key CERT_KEY_PATH
     path to the private key used to generate the certificate, if it does not exist, it will be generated in the provided position
 
 -csr CSR_PATH
@@ -77,6 +77,4 @@ $ gscert -key cert-key.pem -cert cert.pem -d example.com
 
 # Inspired by
 
-This project got inspired by https://github.com/FiloSottile/mkcert
-
-I wanted something that could work exactly like certbot to deploy self-signed certificates
+I wanted something that could work exactly like [certbot](https://github.com/certbot/certbot) to deploy self-signed certificates without installing anything

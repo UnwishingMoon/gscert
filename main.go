@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -24,7 +25,7 @@ const (
 	dRootKeyName  = `root-key.pem`
 	dRootCertName = `root-cert.pem`
 
-	dCertKeyName = `cert-key.pem`
+	dCertKeyName = `key.pem`
 	dCertName    = `cert.pem`
 
 	dcsrName = `csr.pem`
@@ -47,7 +48,7 @@ Options:
 	-cert CERT_PATH
 		path to a certificate, if it does not exist, it will be generated in the provided position
 
-	-cert-key CERT_KEY_PATH
+	-key CERT_KEY_PATH
 		path to the private key used to generate the certificate, if it does not exist, it will be generated in the provided position
 
 	-csr CSR_PATH
@@ -57,11 +58,13 @@ Options:
 		path to the private key used for generating the certificate signing request, if it does not exist, it will be generated in the provided position
 
 	-renew
-		provides the flag if you want the certificates to be renewed in-place
+		provide the flag if you want the certificates to be renewed in-place
+
+	-sha
+		provide the flag if you want to generate keys using RSA4096 instead of ECDSA
 
 	-org ORGANIZATION
 		organization name to use during the certificate creation (Default: "GSCert Security Certificates")
-
 
 	-nginx
 		reloads nginx after successful certificate generation or renewal
@@ -123,7 +126,7 @@ func main() {
 		csrFlag       = flag.String("csr", "", "")                             // Path to CSR
 		csrKeyFlag    = flag.String("csr-key", "", "")                         // Path to CSR key
 		certFlag      = flag.String("cert", "", "")                            // Path to certificate
-		certKeyFlag   = flag.String("cert-key", "", "")                        // Path to key
+		certKeyFlag   = flag.String("key", "", "")                             // Path to key
 		renewFlag     = flag.Bool("renew", false, "")                          // If the certificate should just be renewed in-place
 		nginxFlag     = flag.Bool("nginx", false, "")                          // Reloads nginx if provided and no configuration error is found
 		apacheFlag    = flag.Bool("apache", false, "")                         // Reloads apache if provided and no configuration error is found
@@ -131,6 +134,7 @@ func main() {
 		org           = flag.String("org", "GSCert Security Certificates", "") // Custom organization name
 		workDirFlag   = flag.String("work-dir", "", "")                        // Path to working directory
 		configDirFlag = flag.String("config-dir", "", "")                      // Path to custom configuration directory
+		rsaFlag       = flag.Bool("rsa", false, "")                            // If should create keys using RSA4096 instead of ECDSA
 
 		// Serialnumbers
 		serialNumberLimit = new(big.Int).Lsh(big.NewInt(1), 128)
@@ -138,8 +142,7 @@ func main() {
 		certSerial, _     = rand.Int(rand.Reader, serialNumberLimit)
 
 		// CA
-		rootKey *ecdsa.PrivateKey
-		//rootCert *x509.Certificate
+		rootKey  crypto.PrivateKey
 		rootTmpl = x509.Certificate{
 			NotBefore:    time.Now().UTC().AddDate(0, 0, -1),
 			NotAfter:     time.Now().UTC().AddDate(10, 0, 0),
@@ -156,8 +159,7 @@ func main() {
 		}
 
 		// Certificate
-		certKey *ecdsa.PrivateKey
-		//cert     *x509.Certificate
+		certKey  crypto.PrivateKey
 		certTmpl = x509.Certificate{
 			NotBefore:    time.Now().UTC().AddDate(0, 0, -1),
 			NotAfter:     time.Now().UTC().AddDate(1, 0, 0),
@@ -173,8 +175,7 @@ func main() {
 		}
 
 		// CSR
-		csrKey crypto.PrivateKey
-		//csr     *x509.CertificateRequest
+		csrKey  crypto.PrivateKey
 		csrTmpl = x509.CertificateRequest{
 			Subject: pkix.Name{
 				CommonName:   *org,
@@ -187,7 +188,7 @@ func main() {
 	// Parsing flags
 	flag.Var(&domains, "d", "")
 	flag.Usage = func() {
-		fmt.Fprint(flag.CommandLine.Output(), usage)
+		//fmt.Fprint(flag.CommandLine.Output(), usage)
 	}
 	flag.Parse()
 
@@ -276,13 +277,13 @@ func main() {
 
 		// Decoding the key
 		block, _ := pem.Decode(fileContents)
-		if block.Type != "EC PRIVATE KEY" {
+		if block.Type != "PRIVATE KEY" {
 			fmt.Println(*rootKeyFlag, "input file is not a private key, found:", block.Type)
 			return
 		}
 
 		// Parse the private key
-		rootKey, err = x509.ParseECPrivateKey(block.Bytes)
+		rootKey, err = x509.ParsePKCS8PrivateKey(block.Bytes)
 		if err != nil {
 			fmt.Println("could not parse the root private key:", err)
 			return
@@ -291,7 +292,11 @@ func main() {
 	} else {
 
 		// Generating a new key
-		rootKey, err = ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+		if *rsaFlag {
+			rootKey, err = rsa.GenerateKey(rand.Reader, 4096)
+		} else {
+			rootKey, err = ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+		}
 		if err != nil {
 			fmt.Println("could not generate root private key:", err)
 			return
@@ -305,11 +310,11 @@ func main() {
 		}
 		defer file.Close()
 
-		keyBytes, _ := x509.MarshalECPrivateKey(rootKey)
+		keyBytes, _ := x509.MarshalPKCS8PrivateKey(rootKey)
 
 		// Writing to it
 		err = pem.Encode(file, &pem.Block{
-			Type:  "EC PRIVATE KEY",
+			Type:  "PRIVATE KEY",
 			Bytes: keyBytes,
 		})
 		if err != nil {
@@ -341,7 +346,7 @@ func main() {
 	} else {
 
 		// Generating the certificate
-		fileContents, err := x509.CreateCertificate(rand.Reader, &rootTmpl, &rootTmpl, rootKey.Public(), rootKey)
+		fileContents, err := x509.CreateCertificate(rand.Reader, &rootTmpl, &rootTmpl, rootKey.(crypto.Signer).Public(), rootKey)
 		if err != nil {
 			fmt.Println("could not create root certificate:", err)
 			return
@@ -380,22 +385,27 @@ func main() {
 
 			// Decoding the key
 			pem, _ := pem.Decode(fileContents)
-			if pem.Type != "EC PRIVATE KEY" {
+			if pem.Type != "PRIVATE KEY" {
 				fmt.Println(*certKeyFlag, "input file is not a private key, found:", pem.Type)
 				return
 			}
 
 			// Parse the private key
-			certKey, err = x509.ParseECPrivateKey(pem.Bytes)
+			certKey, err = x509.ParsePKCS8PrivateKey(pem.Bytes)
 			if err != nil {
 				fmt.Println("could not parse the private key:", err)
 				return
 			}
 
 		} else {
-
 			// Generating a new key
-			certKey, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+
+			if *rsaFlag {
+				certKey, err = rsa.GenerateKey(rand.Reader, 4096)
+			} else {
+
+				certKey, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+			}
 			if err != nil {
 				fmt.Println("could not generate cert private key:", err)
 				return
@@ -409,11 +419,11 @@ func main() {
 			}
 			defer file.Close()
 
-			keyBytes, _ := x509.MarshalECPrivateKey(certKey)
+			keyBytes, _ := x509.MarshalPKCS8PrivateKey(certKey)
 
 			// Writing to it
 			err = pem.Encode(file, &pem.Block{
-				Type:  "EC PRIVATE KEY",
+				Type:  "PRIVATE KEY",
 				Bytes: keyBytes,
 			})
 			if err != nil {
@@ -464,7 +474,7 @@ func main() {
 
 				// Recreating the certificate
 
-				fileContents, err = x509.CreateCertificate(rand.Reader, &certTmpl, &rootTmpl, certKey.Public(), rootKey)
+				fileContents, err = x509.CreateCertificate(rand.Reader, &certTmpl, &rootTmpl, certKey.(crypto.Signer).Public(), rootKey)
 				if err != nil {
 					fmt.Println("could not generate the new certificate:", err)
 					return
@@ -517,7 +527,7 @@ func main() {
 			} else {
 
 				// Generating the certificate
-				fileContents, err := x509.CreateCertificate(rand.Reader, &certTmpl, &rootTmpl, certKey.Public(), rootKey)
+				fileContents, err := x509.CreateCertificate(rand.Reader, &certTmpl, &rootTmpl, certKey.(crypto.Signer).Public(), rootKey)
 				if err != nil {
 					fmt.Println("could not create certificate:", err)
 					return
@@ -573,11 +583,11 @@ func main() {
 		}
 		defer file.Close()
 
-		keyBytes, _ := x509.MarshalECPrivateKey(certKey)
+		keyBytes, _ := x509.MarshalPKCS8PrivateKey(certKey)
 
 		// Writing to it
 		err = pem.Encode(file, &pem.Block{
-			Type:  "EC PRIVATE KEY",
+			Type:  "PRIVATE KEY",
 			Bytes: keyBytes,
 		})
 		if err != nil {

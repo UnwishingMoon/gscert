@@ -143,15 +143,10 @@ func main() {
 
 		// CA
 		rootKey  crypto.PrivateKey
-		rootTmpl = x509.Certificate{
-			NotBefore:    time.Now().UTC().AddDate(0, 0, -1),
-			NotAfter:     time.Now().UTC().AddDate(10, 0, 0),
-			SerialNumber: rootSerial,
-			Subject: pkix.Name{
-				Organization:       []string{*org},
-				OrganizationalUnit: []string{*org},
-				CommonName:         *org,
-			},
+		rootTmpl = &x509.Certificate{
+			NotBefore:             time.Now().UTC().AddDate(0, 0, -1),
+			NotAfter:              time.Now().UTC().AddDate(10, 0, 0),
+			SerialNumber:          rootSerial,
 			BasicConstraintsValid: true,
 			IsCA:                  true,
 			KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
@@ -161,14 +156,9 @@ func main() {
 		// Certificate
 		certKey  crypto.PrivateKey
 		certTmpl = x509.Certificate{
-			NotBefore:    time.Now().UTC().AddDate(0, 0, -1),
-			NotAfter:     time.Now().UTC().AddDate(1, 0, 0),
-			SerialNumber: certSerial,
-			Subject: pkix.Name{
-				Organization:       []string{*org},
-				CommonName:         *org,
-				OrganizationalUnit: []string{*org},
-			},
+			NotBefore:             time.Now().UTC().AddDate(0, 0, -1),
+			NotAfter:              time.Now().UTC().AddDate(1, 0, 0),
+			SerialNumber:          certSerial,
 			BasicConstraintsValid: true,
 			IsCA:                  false,
 			KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
@@ -230,6 +220,16 @@ func main() {
 		if err != nil {
 			*workDirFlag = ""
 		}
+	}
+
+	rootTmpl.Subject, certTmpl.Subject = pkix.Name{
+		Organization:       []string{*org},
+		CommonName:         *org,
+		OrganizationalUnit: []string{*org},
+	}, pkix.Name{
+		Organization:       []string{*org},
+		CommonName:         *org,
+		OrganizationalUnit: []string{*org},
 	}
 
 	// FRoot key flag was not provided, using the default
@@ -343,10 +343,16 @@ func main() {
 			return
 		}
 
+		rootTmpl, err = x509.ParseCertificate(pem.Bytes)
+		if err != nil {
+			fmt.Println("could not parse the previous certificate:", err)
+			return
+		}
+
 	} else {
 
 		// Generating the certificate
-		fileContents, err := x509.CreateCertificate(rand.Reader, &rootTmpl, &rootTmpl, rootKey.(crypto.Signer).Public(), rootKey)
+		fileContents, err := x509.CreateCertificate(rand.Reader, rootTmpl, rootTmpl, rootKey.(crypto.Signer).Public(), rootKey)
 		if err != nil {
 			fmt.Println("could not create root certificate:", err)
 			return
@@ -474,7 +480,7 @@ func main() {
 
 				// Recreating the certificate
 
-				fileContents, err = x509.CreateCertificate(rand.Reader, &certTmpl, &rootTmpl, certKey.(crypto.Signer).Public(), rootKey)
+				fileContents, err = x509.CreateCertificate(rand.Reader, &certTmpl, rootTmpl, certKey.(crypto.Signer).Public(), rootKey)
 				if err != nil {
 					fmt.Println("could not generate the new certificate:", err)
 					return
@@ -527,7 +533,7 @@ func main() {
 			} else {
 
 				// Generating the certificate
-				fileContents, err := x509.CreateCertificate(rand.Reader, &certTmpl, &rootTmpl, certKey.(crypto.Signer).Public(), rootKey)
+				fileContents, err := x509.CreateCertificate(rand.Reader, &certTmpl, rootTmpl, certKey.(crypto.Signer).Public(), rootKey)
 				if err != nil {
 					fmt.Println("could not create certificate:", err)
 					return

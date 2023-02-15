@@ -2,8 +2,7 @@ package main
 
 import (
 	"crypto"
-	"crypto/ecdsa"
-	"crypto/elliptic"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -60,8 +59,8 @@ Options:
 	-renew
 		provide the flag if you want the certificates to be renewed in-place
 
-	-sha
-		provide the flag if you want to generate keys using RSA4096 instead of ECDSA
+	-rsa
+		provide the flag if you want to generate keys using RSA4096 instead of ed25519
 
 	-org ORGANIZATION
 		organization name to use during the certificate creation (Default: "GSCert Security Certificates")
@@ -134,7 +133,7 @@ func main() {
 		org           = flag.String("org", "GSCert Security Certificates", "") // Custom organization name
 		workDirFlag   = flag.String("work-dir", "", "")                        // Path to working directory
 		configDirFlag = flag.String("config-dir", "", "")                      // Path to custom configuration directory
-		rsaFlag       = flag.Bool("rsa", false, "")                            // If should create keys using RSA4096 instead of ECDSA
+		rsaFlag       = flag.Bool("rsa", false, "")                            // If should create keys using RSA4096 instead of ed25519
 
 		// Serialnumbers
 		serialNumberLimit = new(big.Int).Lsh(big.NewInt(1), 128)
@@ -171,7 +170,7 @@ func main() {
 				CommonName:   *org,
 				Organization: []string{*org},
 			},
-			SignatureAlgorithm: x509.ECDSAWithSHA512,
+			SignatureAlgorithm: x509.SignatureAlgorithm(x509.Ed25519),
 		}
 	)
 
@@ -295,7 +294,7 @@ func main() {
 		if *rsaFlag {
 			rootKey, err = rsa.GenerateKey(rand.Reader, 4096)
 		} else {
-			rootKey, err = ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+			_, rootKey, err = ed25519.GenerateKey(rand.Reader)
 		}
 		if err != nil {
 			fmt.Println("could not generate root private key:", err)
@@ -410,7 +409,7 @@ func main() {
 				certKey, err = rsa.GenerateKey(rand.Reader, 4096)
 			} else {
 
-				certKey, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+				_, certKey, err = ed25519.GenerateKey(rand.Reader)
 			}
 			if err != nil {
 				fmt.Println("could not generate cert private key:", err)
@@ -575,7 +574,7 @@ func main() {
 		}
 
 		// Generating a new key
-		csrKey, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		_, csrKey, err = ed25519.GenerateKey(rand.Reader)
 		if err != nil {
 			fmt.Println("could not generate cert private key:", err)
 			return

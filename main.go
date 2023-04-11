@@ -75,7 +75,7 @@ Options:
 		command or script to run after the certificate is generated, only executed on successfull runs
 
 	-config-dir CONFIG_DIR
-		configuration path where CA files will be generated, read if not provided (default: ~/` + configFolder + `)
+		configuration path where CA files will be generated, or read if not provided (default: ~/` + configFolder + `)
 
 	-work-dir WORK_PATH
 		change working directory inside the provided directory (default: current directory)

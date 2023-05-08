@@ -249,7 +249,7 @@ func main() {
 
 	// If is not a renew but certiticates flags are provided without domains
 	if !*renewFlag && (*certKeyFlag != "" || *certFlag != "") && len(domains) == 0 {
-		fmt.Println("if cert and key flags are provided, domains must be provided too")
+		fmt.Println("if cert and key flags are provided but no renew flag, domains must be provided too")
 		return
 	} else if (*certKeyFlag == "" && *certFlag == "") && len(domains) >= 1 { // If no certificates flags are provided, but domains are provided
 		*certKeyFlag = "key.pem"

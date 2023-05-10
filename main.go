@@ -276,16 +276,9 @@ func main() {
 
 		// Decoding the key
 		block, _ := pem.Decode(fileContents)
-		if *rsaFlag {
-			if block.Type != "RSA PRIVATE KEY" {
-				fmt.Println(*rootKeyFlag, "input file is not a private key, found:", block.Type)
-				return
-			}
-		} else {
-			if block.Type != "PRIVATE KEY" {
-				fmt.Println(*rootKeyFlag, "input file is not a private key, found:", block.Type)
-				return
-			}
+		if block.Type != "PRIVATE KEY" && block.Type != "RSA PRIVATE KEY" {
+			fmt.Println(*rootKeyFlag, "input file is not a private key, found:", block.Type)
+			return
 		}
 
 		// Parse the private key
@@ -397,16 +390,9 @@ func main() {
 
 			// Decoding the key
 			pem, _ := pem.Decode(fileContents)
-			if *rsaFlag {
-				if pem.Type != "RSA PRIVATE KEY" {
-					fmt.Println(*certKeyFlag, "input file is not a private key, found:", pem.Type)
-					return
-				}
-			} else {
-				if pem.Type != "PRIVATE KEY" {
-					fmt.Println(*certKeyFlag, "input file is not a private key, found:", pem.Type)
-					return
-				}
+			if pem.Type != "PRIVATE KEY" && pem.Type != "RSA PRIVATE KEY" {
+				fmt.Println(*certKeyFlag, "input file is not a private key, found:", pem.Type)
+				return
 			}
 
 			// Parse the private key

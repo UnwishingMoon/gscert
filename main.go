@@ -156,7 +156,7 @@ func main() {
 		certKey  crypto.PrivateKey
 		certTmpl = x509.Certificate{
 			NotBefore:             time.Now().UTC().AddDate(0, 0, -1),
-			NotAfter:              time.Now().UTC().AddDate(1, 0, 0),
+			NotAfter:              time.Now().UTC().AddDate(1, 0, 0).Add(-1 * time.Second),
 			SerialNumber:          certSerial,
 			BasicConstraintsValid: true,
 			IsCA:                  false,
